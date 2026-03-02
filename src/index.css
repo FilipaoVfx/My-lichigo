@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #ec5b13;
+  --color-brand-accent: #2563eb;
+  --color-brand-deepBlue: #1e3a8a;
+  --color-brand-profGreen: #15803d;
+  --color-brand-primary: #059669;
+  --color-brand-secondary: #1e40af;
+
+  /* Semantic Overrides for Global Dark Mode */
+  --color-white: var(--surface);
+  --color-gray-50: var(--background);
+  --color-gray-100: var(--border);
+  --color-gray-200: var(--border);
+  --color-gray-900: var(--text);
+  --color-gray-800: var(--text);
+  --color-gray-700: var(--text);
+
+  /* Dark Mode Semantic Mapping */
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-text-main: var(--text);
+  --color-border-main: var(--border);
+}
+
+:root {
+  --background: #f8f9fa;
+  /* gray-50 */
+  --text: #111827;
+  /* gray-900 */
+  --surface: #ffffff;
+  --border: #f3f4f6;
+  /* gray-100 */
+}
+
+.dark {
+  --background: #0f172a;
+  /* Slate-950 */
+  --text: #f8fafc;
+  /* Slate-50 */
+  --surface: #1e293b;
+  /* Slate-800 */
+  --border: #334155;
+  /* Slate-700 */
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--text);
+    font-family: 'Public Sans', system-ui, -apple-system, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  /* Global input/form styling for Dark Mode */
+  input,
+  select,
+  textarea {
+    background-color: var(--surface) !important;
+    color: var(--text) !important;
+    border-color: var(--border) !important;
+  }
+}
+
+/* Global transitions for theme switching */
+*,
+::before,
+::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+@layer components {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .touch-target {
+    min-height: 48px;
+    min-width: 48px;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* Animations and custom transitions */
+.transition-transform {
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  transition-duration: 150ms;
+}
+
+.active\:scale-95:active {
+  transform: scale(0.95);
+}
+
+.active\:scale-90:active {
+  transform: scale(0.90);
+}
