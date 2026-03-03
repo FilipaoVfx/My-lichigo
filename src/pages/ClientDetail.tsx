@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.ts';
 import { ArrowLeft, Plus, DollarSign, Calendar, Clock, Wallet, Percent, Trash2, StickyNote, Smartphone, ChevronDown, CheckCircle2, Loader2 } from 'lucide-react';
 import { useLoans } from '../hooks/useLoans.ts';
 import { usePayments } from '../hooks/usePayments.ts';
+import LoanTimeline from '../components/LoanTimeline.tsx';
 import { useClients } from '../hooks/useClients.ts';
 import type { Client } from '../types/client.ts';
 import type { Loan } from '../types/loan.ts';
@@ -28,6 +29,8 @@ export default function ClientDetail() {
     const [savingNote, setSavingNote] = useState(false);
     const [paymentAmount, setPaymentAmount] = useState('');
     const [noteContent, setNoteContent] = useState('');
+    const [showAdvanced, setShowAdvanced] = useState(false);
+    const [deferDays, setDeferDays] = useState(5);
 
     // Form State for new loan
     const [amount, setAmount] = useState('');
@@ -71,6 +74,8 @@ export default function ClientDetail() {
         if (!error) {
             setIsPaymentModalOpen(false);
             setPaymentAmount('');
+            setShowAdvanced(false);
+            setDeferDays(5);
             fetchLoans();
         } else {
             alert(`Error al registrar pago: ${error}`);
@@ -91,7 +96,7 @@ export default function ClientDetail() {
             interest_rate: intRate,
             interest_rate_period: paymentFreq,
             payment_frequency: paymentFreq,
-            term_count: parseInt(termCount, 10),
+            term_count: termCount ? parseInt(termCount, 10) : 1,
             disbursement_date: disbursementDate,
             first_due_date: firstDueDate,
             grace_days: 0,
@@ -308,8 +313,10 @@ export default function ClientDetail() {
                                                 <Clock size={14} />
                                             </div>
                                             <div>
-                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Frecuencia</p>
-                                                <p className="text-xs font-bold text-gray-700 uppercase">{loan.payment_frequency}</p>
+                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Pago</p>
+                                                <p className="text-xs font-bold text-gray-700 uppercase">
+                                                    {{ daily: 'Diaria', weekly: 'Semanal', biweekly: 'Quincenal', monthly: 'Mensual' }[loan.payment_frequency] || loan.payment_frequency}
+                                                </p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -336,6 +343,8 @@ export default function ClientDetail() {
                                                 onClick={() => {
                                                     setSelectedLoan(loan);
                                                     setPaymentAmount(cuota.toString());
+                                                    setShowAdvanced(false);
+                                                    setDeferDays(5);
                                                     setIsPaymentModalOpen(true);
                                                 }}
                                                 className="flex-1 bg-brand-primary hover:bg-emerald-700 text-white h-12 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all flex items-center justify-center gap-2"
@@ -355,6 +364,9 @@ export default function ClientDetail() {
                                             <StickyNote size={18} />
                                         </button>
                                     </div>
+
+                                    {/* Componente del Timeline incorporado para trazabilidad */}
+                                    <LoanTimeline loanId={loan.id} onPaymentVoided={fetchLoans} />
                                 </article>
                             )
                         })
@@ -395,8 +407,8 @@ export default function ClientDetail() {
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1" htmlFor="term">Número de Cuotas</label>
-                                <input id="term" type="number" className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-bold" value={termCount} onChange={(e) => setTermCount(e.target.value)} required placeholder="Ej: 12" />
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1 ml-1" htmlFor="term">Número de Cuotas (Opcional)</label>
+                                <input id="term" type="number" className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-bold" value={termCount} onChange={(e) => setTermCount(e.target.value)} placeholder="Ej: 1" />
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
@@ -428,23 +440,108 @@ export default function ClientDetail() {
                             </div>
                             <button onClick={() => setIsPaymentModalOpen(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">✕</button>
                         </div>
-                        <form onSubmit={handleAddPayment} className="space-y-8">
-                            <div className="text-center">
-                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4" htmlFor="payAmount">Monto a recibir ($)</label>
+                        <form onSubmit={handleAddPayment} className="space-y-6">
+                            {/* Opciones de pago rápido */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setPaymentAmount(Math.round(selectedLoan.total_expected / selectedLoan.term_count).toString())}
+                                    className={`p-3 rounded-xl border-2 text-sm font-bold flex flex-col items-center justify-center transition-all ${paymentAmount === Math.round(selectedLoan.total_expected / selectedLoan.term_count).toString() ? 'border-brand-primary bg-brand-primary/10 text-brand-primary' : 'border-gray-100 text-gray-600 hover:border-gray-200 hover:bg-gray-50'}`}
+                                >
+                                    <span className="text-[10px] uppercase text-gray-400 tracking-wider mb-1">Cuota + Interés</span>
+                                    ${Math.round(selectedLoan.total_expected / selectedLoan.term_count).toLocaleString()}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPaymentAmount(Math.round(selectedLoan.principal_amount / selectedLoan.term_count).toString())}
+                                    className={`p-3 rounded-xl border-2 text-sm font-bold flex flex-col items-center justify-center transition-all ${paymentAmount === Math.round(selectedLoan.principal_amount / selectedLoan.term_count).toString() ? 'border-brand-primary bg-brand-primary/10 text-brand-primary' : 'border-gray-100 text-gray-600 hover:border-gray-200 hover:bg-gray-50'}`}
+                                >
+                                    <span className="text-[10px] uppercase text-gray-400 tracking-wider mb-1">Solo Cuota</span>
+                                    ${Math.round(selectedLoan.principal_amount / selectedLoan.term_count).toLocaleString()}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setPaymentAmount(Math.round((selectedLoan.total_expected - selectedLoan.principal_amount) / selectedLoan.term_count).toString())}
+                                    className={`p-3 rounded-xl border-2 text-sm font-bold flex flex-col items-center justify-center transition-all ${paymentAmount === Math.round((selectedLoan.total_expected - selectedLoan.principal_amount) / selectedLoan.term_count).toString() ? 'border-brand-primary bg-brand-primary/10 text-brand-primary' : 'border-gray-100 text-gray-600 hover:border-gray-200 hover:bg-gray-50'}`}
+                                >
+                                    <span className="text-[10px] uppercase text-gray-400 tracking-wider mb-1">Solo Interés</span>
+                                    ${Math.round((selectedLoan.total_expected - selectedLoan.principal_amount) / selectedLoan.term_count).toLocaleString()}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setPaymentAmount(''); document.getElementById('payAmount')?.focus(); }}
+                                    className={`p-3 rounded-xl border-2 text-sm font-bold flex flex-col items-center justify-center transition-all ${paymentAmount === '' ? 'border-brand-primary bg-brand-primary/10 text-brand-primary' : 'border-gray-100 text-gray-600 hover:border-gray-200 hover:bg-gray-50'}`}
+                                >
+                                    <span className="text-[10px] uppercase text-gray-400 tracking-wider mb-1">Personalizado</span>
+                                    Ingresar
+                                </button>
+                            </div>
+
+                            <div className="text-center pt-2">
+                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2" htmlFor="payAmount">Monto a recibir ($)</label>
                                 <input
                                     id="payAmount"
                                     type="number"
-                                    className="w-full bg-transparent border-none text-5xl font-black text-brand-primary text-center focus:outline-none placeholder-gray-100"
+                                    className="w-full bg-transparent border-none text-5xl font-black text-brand-primary text-center focus:outline-none placeholder-gray-200"
                                     value={paymentAmount}
                                     onChange={(e) => setPaymentAmount(e.target.value)}
+                                    placeholder="0"
                                     required
                                     autoFocus
                                 />
-                                <div className="mt-4 inline-flex items-center gap-2 px-4 py-1 bg-gray-100 rounded-full text-[10px] font-bold text-gray-500 uppercase">
-                                    <Smartphone size={12} />
+                                <div className="mt-4 inline-flex items-center gap-2 px-4 py-1.5 bg-gray-100 rounded-full text-[10px] font-bold text-gray-500 uppercase">
+                                    <Wallet size={12} />
                                     Saldo actual: ${Math.round(selectedLoan.balance).toLocaleString()}
                                 </div>
+
+                                <div className="mt-4 border-t border-gray-100 pt-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowAdvanced(!showAdvanced)}
+                                        className="text-[10px] font-black uppercase tracking-widest text-brand-accent hover:text-blue-700 transition-colors flex items-center justify-center w-full focus:outline-none"
+                                    >
+                                        {showAdvanced ? 'Ocultar Opciones Avanzadas' : 'Mostrar Opciones Avanzadas'}
+                                    </button>
+                                </div>
                             </div>
+
+                            {showAdvanced && (
+                                <div className="p-4 bg-gray-50 rounded-2xl border border-gray-100 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <div className="flex justify-between items-center mb-4">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest" htmlFor="deferDays">
+                                            Diferir saldo
+                                        </label>
+                                        <span className="text-sm font-bold text-brand-primary bg-brand-primary/10 px-3 py-1 rounded-full">
+                                            {deferDays} {deferDays === 1 ? 'día' : 'días'}
+                                        </span>
+                                    </div>
+                                    <input
+                                        id="deferDays"
+                                        type="range"
+                                        min="5"
+                                        max="30"
+                                        step="5"
+                                        className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-brand-accent transition-all"
+                                        value={deferDays}
+                                        onChange={(e) => {
+                                            const days = parseInt(e.target.value, 10);
+                                            setDeferDays(days);
+                                            // Robust mathematical calculation: Math.ceil ensuring the whole balance is covered when amortized
+                                            const calculatedValue = Math.ceil(selectedLoan.balance / days);
+                                            setPaymentAmount(calculatedValue.toString());
+                                        }}
+                                    />
+                                    <div className="flex justify-between mt-2 text-[10px] font-bold text-gray-400">
+                                        <span>5</span>
+                                        <div className="flex flex-col items-center">
+                                            <span className="uppercase tracking-widest mb-0.5">Calculadora dinámica</span>
+                                            <span className="text-gray-900 text-sm font-black">${Math.ceil(selectedLoan.balance / deferDays).toLocaleString()} / día</span>
+                                        </div>
+                                        <span>30</span>
+                                    </div>
+                                </div>
+                            )}
+
                             <button type="submit" className="w-full bg-brand-primary hover:bg-emerald-700 text-white h-16 rounded-2xl font-black shadow-lg shadow-emerald-500/20 active:scale-95 transition-all text-xl flex items-center justify-center gap-3" disabled={savingPayment}>
                                 {savingPayment ? 'Sincronizando...' : (
                                     <>

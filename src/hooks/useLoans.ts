@@ -51,9 +51,9 @@ export function useLoans(clientId: string) {
             if (clientError || !client) throw new Error("Cliente no encontrado");
             if (client.is_deleted) throw new Error("No se puede asignar un préstamo a un cliente eliminado");
 
-            // Basic calculation for MVP (Simple Interest)
+            // Basic calculation for MVP (Flat Simple Interest applying only once)
             const interestAmount = loanData.principal_amount * loanData.interest_rate;
-            const totalExpected = Math.round(loanData.principal_amount + (interestAmount * loanData.term_count));
+            const totalExpected = Math.round(loanData.principal_amount + interestAmount);
 
             const newLoanData = {
                 ...loanData,
