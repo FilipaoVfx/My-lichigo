@@ -2,6 +2,7 @@ import { Settings, Search, Loader2, ChevronRight, AlertCircle, Clock } from 'luc
 import { useState } from 'react';
 import { useCollections } from '../hooks/useCollections.ts';
 import { useNavigate } from 'react-router-dom';
+import { formatCurrency } from '../lib/format.ts';
 
 export default function Cobranza() {
     const [view, setView] = useState<'today' | 'overdue' | 'upcoming'>('today');
@@ -139,8 +140,8 @@ export default function Cobranza() {
                                     <div className="flex justify-between items-end pt-2">
                                         <div>
                                             <p className="text-[10px] uppercase text-gray-400 font-bold tracking-wider">Monto Cuota</p>
-                                            <p className="text-xl font-bold text-gray-900">${cuota.toLocaleString()}</p>
-                                            <p className="text-[10px] text-gray-500 font-medium">Saldo: <span className="font-bold">${Math.round(loan.balance).toLocaleString()}</span></p>
+                                            <p className="text-xl font-bold text-gray-900">{formatCurrency(cuota)}</p>
+                                            <p className="text-[10px] text-gray-500 font-medium">Saldo: <span className="font-bold">{formatCurrency(loan.balance)}</span></p>
                                         </div>
                                         <button
                                             onClick={(e) => { e.stopPropagation(); navigate(`/clientes/${client?.id}`); }}

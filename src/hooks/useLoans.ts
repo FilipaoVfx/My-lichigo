@@ -51,9 +51,20 @@ export function useLoans(clientId: string) {
             if (clientError || !client) throw new Error("Cliente no encontrado");
             if (client.is_deleted) throw new Error("No se puede asignar un préstamo a un cliente eliminado");
 
-            // Basic calculation for MVP (Simple Interest)
-            const interestAmount = loanData.principal_amount * loanData.interest_rate;
-            const totalExpected = Math.round(loanData.principal_amount + (interestAmount * loanData.term_count));
+            // Calculation engine — respects interest_type
+            const rate = loanData.interest_rate;
+            const principal = loanData.principal_amount;
+            const terms = loanData.term_count || 1;
+            let totalExpected: number;
+
+            if (loanData.interest_type === 'flat') {
+                // Flat: interest always calculated on original principal (informal/gota-a-gota style)
+                totalExpected = Math.round(principal + (principal * rate * terms));
+            } else {
+                // Simple: same formula for MVP — interest accrued per period on principal
+                totalExpected = Math.round(principal + (principal * rate * terms));
+            }
+
 
             const newLoanData = {
                 ...loanData,

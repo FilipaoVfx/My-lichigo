@@ -16,6 +16,8 @@ export default function Clients() {
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [phone, setPhone] = useState('');
+    const [documentId, setDocumentId] = useState('');
+    const [address, setAddress] = useState('');
 
     const filteredClients = clients.filter(client => {
         const fullName = `${client.first_name} ${client.last_name}`.toLowerCase();
@@ -31,8 +33,8 @@ export default function Clients() {
             first_name: firstName,
             last_name: lastName,
             phone: phone || null,
-            document_id: null,
-            address: null,
+            document_id: documentId || null,
+            address: address || null,
             status: 'active',
             notes: null
         });
@@ -43,6 +45,8 @@ export default function Clients() {
             setFirstName('');
             setLastName('');
             setPhone('');
+            setDocumentId('');
+            setAddress('');
         } else {
             alert(`Error: ${error}`);
         }
@@ -182,7 +186,7 @@ export default function Clients() {
                             </div>
 
                             <div className="space-y-1.5">
-                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1" htmlFor="phone">Teléfono de contacto</label>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1" htmlFor="phone">Teléfono de contacto <span className="normal-case font-normal">(opcional)</span></label>
                                 <div className="relative">
                                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-300">
                                         <Smartphone size={16} />
@@ -194,6 +198,31 @@ export default function Clients() {
                                         onChange={(e) => setPhone(e.target.value)}
                                         className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-bold placeholder-gray-200"
                                         placeholder="+1 234 567 8900"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1" htmlFor="documentId">Cédula / ID <span className="normal-case font-normal">(opcional)</span></label>
+                                    <input
+                                        id="documentId"
+                                        type="text"
+                                        value={documentId}
+                                        onChange={(e) => setDocumentId(e.target.value)}
+                                        className="w-full px-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-bold placeholder-gray-200"
+                                        placeholder="12345678"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1" htmlFor="address">Dirección <span className="normal-case font-normal">(opcional)</span></label>
+                                    <input
+                                        id="address"
+                                        type="text"
+                                        value={address}
+                                        onChange={(e) => setAddress(e.target.value)}
+                                        className="w-full px-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-bold placeholder-gray-200"
+                                        placeholder="Calle 123 #45-67"
                                     />
                                 </div>
                             </div>

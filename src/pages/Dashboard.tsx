@@ -2,6 +2,7 @@ import { CalendarDays, Loader2, User, UserPlus, FilePlus, DollarSign, ChevronRig
 import { useDashboardData } from '../hooks/useDashboardData.ts';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth.ts';
+import { formatCurrency } from '../lib/format.ts';
 
 export default function Dashboard() {
     const { stats, collectionsToday, loading, error, refresh } = useDashboardData();
@@ -56,7 +57,7 @@ export default function Dashboard() {
                 <section className="bg-brand-deepBlue rounded-2xl p-6 text-white shadow-lg">
                     <div className="mb-4">
                         <p className="text-xs opacity-80 uppercase tracking-wide font-semibold mb-1">Cartera Activa Total</p>
-                        <p className="text-3xl font-bold tracking-tight">${Math.round(stats.activePortfolio).toLocaleString()}</p>
+                        <p className="text-3xl font-bold tracking-tight">{formatCurrency(stats.activePortfolio)}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-4 border-t border-white/20 pt-4">
                         <div>
@@ -126,7 +127,7 @@ export default function Dashboard() {
                                 </div>
                                 <div className="flex-1">
                                     <p className="text-sm font-bold text-gray-800">{stats.overdueCount} Préstamos en Mora</p>
-                                    <p className="text-xs text-red-600 font-medium">Total: ${Math.round(stats.overdueAmount).toLocaleString()}</p>
+                                    <p className="text-xs text-red-600 font-medium">Total: {formatCurrency(stats.overdueAmount)}</p>
                                 </div>
                                 <ChevronRight size={18} className="text-gray-300" />
                             </div>
@@ -158,10 +159,10 @@ export default function Dashboard() {
                                     </div>
                                     <div className="flex-1">
                                         <p className="text-sm font-bold text-gray-800">{loan.clients?.first_name} {loan.clients?.last_name}</p>
-                                        <p className="text-xs text-gray-500">Cuota: ${Math.round(loan.total_expected / loan.term_count).toLocaleString()}</p>
+                                        <p className="text-xs text-gray-500">Cuota: {formatCurrency(loan.total_expected / loan.term_count)}</p>
                                     </div>
                                     <div className="text-right">
-                                        <p className="text-sm font-bold text-brand-primary">${Math.round(loan.total_expected / loan.term_count).toLocaleString()}</p>
+                                        <p className="text-sm font-bold text-brand-primary">{formatCurrency(loan.total_expected / loan.term_count)}</p>
                                         <span className="text-[10px] font-bold text-amber-600 uppercase">Hoy</span>
                                     </div>
                                 </div>

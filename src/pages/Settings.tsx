@@ -21,6 +21,9 @@ export default function Settings() {
     const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(
         (localStorage.getItem('theme') as any) || 'system'
     );
+    const [notificationsEnabled, setNotificationsEnabled] = useState(
+        'Notification' in window && Notification.permission === 'granted'
+    );
 
     useEffect(() => {
         const root = window.document.documentElement;
@@ -52,7 +55,37 @@ export default function Settings() {
         {
             title: 'Notificaciones',
             items: [
-                { id: 'reminders', name: 'Recordatorios de cobro', icon: <Bell size={20} className="text-purple-500" />, type: 'link' },
+                { 
+                    id: 'reminders', 
+                    name: 'Recordatorios de cobro', 
+                    icon: <Bell size={20} className="text-purple-500" />, 
+                    type: 'toggle',
+                    value: notificationsEnabled,
+                    action: async () => {
+                        if (!('Notification' in window)) {
+                            alert('Tu navegador no soporta notificaciones.');
+                            return;
+                        }
+                        if (Notification.permission === 'granted') {
+                            alert('Las notificaciones ya están activadas. Para desactivarlas o cambiarlas, ve a los ajustes de tu navegador/sistema.');
+                        } else {
+                            const result = await Notification.requestPermission();
+                            setNotificationsEnabled(result === 'granted');
+                            if (result === 'granted') {
+                                if ('serviceWorker' in navigator) {
+                                    const reg = await navigator.serviceWorker.ready;
+                                    reg.showNotification('Notificaciones Activadas', {
+                                        body: 'Recibirás alertas de mora y cobros diarios.',
+                                        icon: '/pwa-icon.png',
+                                        badge: '/mask-icon.svg',
+                                    } as any);
+                                } else {
+                                    new Notification('Notificaciones Activadas', { body: 'Recibirás alertas de mora y cobros diarios.', icon: '/pwa-icon.png' });
+                                }
+                            }
+                        }
+                    } 
+                },
             ]
         },
         {

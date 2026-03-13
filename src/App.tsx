@@ -9,10 +9,13 @@ import ClientDetail from './pages/ClientDetail.tsx';
 import Settings from './pages/Settings.tsx';
 import Login from './pages/Login.tsx';
 import { useAuth } from './hooks/useAuth.ts';
+import { usePushNotifications } from './hooks/usePushNotifications.ts';
 import './index.css';
 
 // Componente para proteger las rutas privadas
-const PrivateRoute = ({ isAuthenticated }: { isAuthenticated: boolean }) => {
+const PrivateRoute = ({ isAuthenticated, userId }: { isAuthenticated: boolean; userId?: string }) => {
+  usePushNotifications(userId);
+
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
@@ -49,7 +52,7 @@ function App() {
         />
 
         {/* Rutas Privadas / Protegidas */}
-        <Route element={<PrivateRoute isAuthenticated={!!session} />}>
+        <Route element={<PrivateRoute isAuthenticated={!!session} userId={session?.user?.id} />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/clientes" element={<Clients />} />
           <Route path="/clientes/:id" element={<ClientDetail />} />
