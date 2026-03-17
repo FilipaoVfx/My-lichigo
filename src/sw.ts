@@ -5,46 +5,49 @@ declare let self: ServiceWorkerGlobalScope;
 
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Handle Push Notifications (Crucial for "outside the app" / closed app)
+// --- AGGRESSIVE PUSH HANDLING ---
 self.addEventListener('push', (event) => {
-  if (!event.data) return;
-
-  try {
-    const data = event.data.json();
-    const title = data.title || 'Nueva Notificación';
-    const options = {
-      body: data.body || '',
-      icon: '/pwa-icon.png',
-      badge: '/mask-icon.svg',
-      vibrate: [200, 100, 200, 100, 200],
-      tag: data.tag || `alert-${Date.now()}`,
-      data: data.data || {},
-      requireInteraction: true,
-      actions: [
-        { action: 'open', title: 'Ver Detalles' }
-      ]
-    };
-
-    event.waitUntil(
-      self.registration.showNotification(title, options)
-    );
-  } catch (err) {
-    console.error('Error handling push event:', err);
-    // Fallback if not JSON
-    event.waitUntil(
-      self.registration.showNotification('Recordatorio de Préstamo', {
-        body: event.data.text(),
-        icon: '/pwa-icon.png',
-      })
-    );
+  let data: any = {};
+  
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      data = { body: event.data.text() };
+    }
   }
+
+  const title = data.title || '🚨 Aviso de My Lichigo';
+  const options: NotificationOptions = {
+    body: data.body || 'Tienes una actualización importante de tu cartera.',
+    icon: '/pwa-icon.png',
+    badge: '/mask-icon.svg',
+    vibrate: [200, 100, 200, 100, 200, 100, 200],
+    tag: data.tag || 'loan-notification',
+    renotify: true, // Vibrates even if tag is the same
+    requireInteraction: true,
+    data: { 
+      url: data.url || '/',
+      timestamp: Date.now()
+    },
+    silent: false, // Ensure sound if device allows
+    // @ts-ignore - Specific to some browsers for high priority
+    priority: 2, 
+    actions: [
+      { action: 'open', title: 'Ver ahora' }
+    ]
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
 });
 
-// Handle Notification Click
+// --- DEEP LINKING ON CLICK ---
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
 
-  const urlToOpen = new URL('/', self.location.origin).href;
+  const urlToOpen = new URL(event.notification.data?.url || '/', self.location.origin).href;
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
@@ -60,4 +63,13 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
+});
+
+// Force update on the new SW
+self.addEventListener('install', () => {
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim());
 });
