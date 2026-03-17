@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Users, Wallet, BarChart3, Settings } from 'lucide-react';
+import { Home, Users, Wallet, Clock, Settings } from 'lucide-react';
 
 export default function Navigation() {
     return (
@@ -49,17 +49,17 @@ export default function Navigation() {
                 )}
             </NavLink>
 
-            {/* Nav Item: Reportes */}
+            {/* Nav Item: Historial */}
             <NavLink
-                to="/reportes"
+                to="/historial"
                 className={({ isActive }) =>
                     `flex flex-col items-center gap-1 px-3 transition-colors ${isActive ? 'text-gray-800' : 'text-gray-400 hover:text-gray-800'}`
                 }
             >
                 {({ isActive }) => (
                     <>
-                        <BarChart3 size={24} className={`transition-transform ${isActive ? 'scale-110' : ''}`} />
-                        <span className={`text-[10px] tracking-tight ${isActive ? 'font-bold' : 'font-medium'}`}>Reportes</span>
+                        <Clock size={24} className={`transition-transform ${isActive ? 'scale-110' : ''}`} />
+                        <span className={`text-[10px] tracking-tight ${isActive ? 'font-bold' : 'font-medium'}`}>Historial</span>
                     </>
                 )}
             </NavLink>

@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase.ts';
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-export type EstadoCuota = 'pendiente' | 'pagado' | 'vencido' | 'condonado';
+export type EstadoCuota = 'pendiente' | 'pagado' | 'vencido' | 'condonado' | 'parcial';
 
 export interface CuotaPlan {
     id: string;
@@ -88,6 +87,7 @@ export function usePaymentSchedule(prestamoId: string) {
         try {
             const { data: { user }, error: authError } = await supabase.auth.getUser();
             if (authError || !user) throw new Error('Usuario no autenticado');
+            if (params.numero_cuotas <= 0) throw new Error('El número de cuotas debe ser mayor a 0');
 
             const fechaInicio = new Date(params.fecha_primer_vencimiento);
             const baseCuota = Math.round(params.monto_total / params.numero_cuotas);
@@ -134,65 +134,38 @@ export function usePaymentSchedule(prestamoId: string) {
             if (!cuotaToUpdate) throw new Error('Cuota no encontrada');
 
             const nuevoEstado: EstadoCuota = estadoActual === 'pagado' ? 'pendiente' : 'pagado';
-            const ahora = new Date();
-            let paymentIdToSet = null;
-            let montoPagadoToSet = nuevoEstado === 'pagado' ? cuotaToUpdate.monto_cuota : 0;
 
             if (nuevoEstado === 'pagado') {
-                // Determine amount needed to fully pay this cuota
                 const amountNeeded = cuotaToUpdate.monto_cuota - (cuotaToUpdate.monto_pagado || 0);
                 if (amountNeeded > 0) {
-                    const { data: paymentData, error: paymentError } = await supabase
-                        .from('payments')
-                        .insert([{
-                            loan_id: cuotaToUpdate.prestamo_id,
-                            amount: amountNeeded,
-                            method: 'cash',
-                            note: `Pago de Cuota #${cuotaToUpdate.numero_cuota} (Auto)`,
-                            owner_id: user.id,
-                            created_by: user.id,
-                            payment_date: ahora.toISOString().split('T')[0]
-                        }])
-                        .select()
-                        .single();
-
-                    if (paymentError) throw paymentError;
-                    paymentIdToSet = paymentData.id;
+                    const { error: rpcError } = await supabase.rpc('register_loan_payment', {
+                        p_loan_id: cuotaToUpdate.prestamo_id,
+                        p_amount: amountNeeded,
+                        p_payment_type: 'principal',
+                        p_principal_amount: amountNeeded,
+                        p_interest_amount: 0,
+                        p_method: 'cash',
+                        p_note: `Pago de Cuota #${cuotaToUpdate.numero_cuota} (Auto)`,
+                        p_owner_id: user.id,
+                        p_created_by: user.id,
+                        p_target_cuota_id: cuotaToUpdate.id
+                    });
+                    if (rpcError) throw rpcError;
                 }
             } else if (nuevoEstado === 'pendiente' && cuotaToUpdate.pago_id) {
-                // If it was marked paid automatically, delete the payment
-                await supabase.from('payments').delete().eq('id', cuotaToUpdate.pago_id);
+                // If marked as pending, we delete the payment. 
+                // The new DB trigger trigger_payment_deleted automatically resets the cuota.
+                const { error: deleteError } = await supabase.from('payments').delete().eq('id', cuotaToUpdate.pago_id);
+                if (deleteError) throw deleteError;
             }
 
-            const { error } = await supabase
-                .from('cuotas_plan')
-                .update({
-                    estado: nuevoEstado,
-                    monto_pagado: montoPagadoToSet,
-                    fecha_pago: nuevoEstado === 'pagado' ? ahora.toISOString().split('T')[0] : null,
-                    pago_id: nuevoEstado === 'pagado' ? paymentIdToSet : null,
-                    updated_at: ahora.toISOString(),
-                })
-                .eq('id', cuotaId);
-
-            if (error) throw error;
-
-            setCuotas(prev => prev.map(c =>
-                c.id === cuotaId
-                    ? {
-                        ...c,
-                        estado: nuevoEstado,
-                        fecha_pago: nuevoEstado === 'pagado' ? ahora.toISOString().split('T')[0] : null,
-                        monto_pagado: montoPagadoToSet,
-                        pago_id: nuevoEstado === 'pagado' ? paymentIdToSet : null
-                    }
-                    : c
-            ));
+            // The DB triggers handle updating tables, we just refetch
+            await cargarCuotas();
             return { error: null };
         } catch (err: any) {
             return { error: err.message };
         }
-    }, [cuotas]);
+    }, [cuotas, cargarCuotas]);
 
     // Actualizar observaciones de una cuota
     const actualizarObservaciones = useCallback(async (cuotaId: string, observaciones: string) => {
@@ -238,6 +211,22 @@ export function usePaymentSchedule(prestamoId: string) {
         progreso: cuotas.length > 0 ? Math.round((cuotas.filter(c => c.estado === 'pagado').length / cuotas.length) * 100) : 0,
     };
 
+    const borrarCronograma = useCallback(async () => {
+        try {
+            if (!prestamoId) return;
+            const { error } = await supabase
+                .from('cuotas_plan')
+                .delete()
+                .eq('prestamo_id', prestamoId);
+
+            if (error) throw error;
+            setCuotas([]);
+            return { error: null };
+        } catch (err: any) {
+            return { error: err.message };
+        }
+    }, [prestamoId]);
+
     return {
         cuotas,
         cargando,
@@ -245,6 +234,7 @@ export function usePaymentSchedule(prestamoId: string) {
         estadisticas,
         cargarCuotas,
         generarCronograma,
+        borrarCronograma,
         toggleEstadoCuota,
         actualizarObservaciones,
         condonarCuota,

@@ -94,7 +94,7 @@ export default function NewLoan() {
             interest_rate: parseFloat(interestRate) / 100,
             interest_rate_period: frequency as any,
             payment_frequency: frequency as any,
-            term_count: duration ? parseInt(duration) : 1,
+            term_count: duration ? parseInt(duration) : 0,
             disbursement_date: startDate,
             first_due_date: startDate,
             grace_days: parseInt(graceDays) || 0,

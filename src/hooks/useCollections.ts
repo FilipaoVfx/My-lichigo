@@ -8,7 +8,9 @@ export type CollectionItem = {
     total_expected: number;
     principal_amount: number;
     term_count: number;
-    payment_frequency: number;
+    interest_type: 'simple' | 'flat' | 'custom';
+    interest_rate: number;
+    payment_frequency: string;
     next_due_date: string;
     status: string;
     clients: {
@@ -34,7 +36,7 @@ export function useCollections() {
                 .from('loans')
                 .select(`
                     id, client_id, balance, total_expected, principal_amount, term_count, 
-                    payment_frequency, next_due_date, status,
+                    interest_type, interest_rate, payment_frequency, next_due_date, status,
                     clients (id, first_name, last_name)
                 `)
                 .eq('next_due_date', today)
@@ -49,7 +51,7 @@ export function useCollections() {
                 .from('loans')
                 .select(`
                     id, client_id, balance, total_expected, principal_amount, term_count, 
-                    payment_frequency, next_due_date, status,
+                    interest_type, interest_rate, payment_frequency, next_due_date, status,
                     clients (id, first_name, last_name)
                 `)
                 .eq('status', 'overdue')

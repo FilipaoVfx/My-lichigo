@@ -8,50 +8,36 @@ import { useClients } from '../hooks/useClients.ts';
 import { usePaymentSchedule, type CuotaPlan } from '../hooks/usePaymentSchedule.ts';
 import type { Client } from '../types/client.ts';
 import type { Loan } from '../types/loan.ts';
-import { formatCurrency } from '../lib/format.ts';
+import { formatCurrency, formatDate } from '../lib/format.ts';
 
 // ─── Loan Calculator Engine ───────────────────────────────────────────────────
 function calcLoanPreview({
     principal,
     ratePercent,
     termCount,
-    interestType,
     roundTo,
 }: {
     principal: number;
     ratePercent: number;
     termCount: number;
-    interestType: 'simple' | 'flat';
     roundTo: number;
 }) {
     if (!principal || !ratePercent) return null;
     const effectiveTerms = termCount || 1;
     const rate = ratePercent / 100;
 
-    let totalExpected: number;
-    let cuota: number;
-
-    if (interestType === 'flat') {
-        // Flat: interest always on original principal
-        const totalInterest = principal * rate * effectiveTerms;
-        totalExpected = principal + totalInterest;
-        cuota = totalExpected / effectiveTerms;
-    } else {
-        // Simple: interest * effectiveTerms on principal
-        const totalInterest = principal * rate * effectiveTerms;
-        totalExpected = principal + totalInterest;
-        cuota = totalExpected / effectiveTerms;
-    }
+    const totalInterest = Math.round(principal * rate); // Now projection of one period
+    const totalExpected = principal;
+    let cuota = totalExpected / effectiveTerms;
 
     if (roundTo > 1) {
         cuota = Math.ceil(cuota / roundTo) * roundTo;
-        totalExpected = cuota * effectiveTerms;
+        // Total expected stays equal to principal (sum of amortizations)
     } else {
         cuota = Math.round(cuota);
-        totalExpected = Math.round(totalExpected);
     }
 
-    return { totalExpected, cuota, totalInterest: totalExpected - principal };
+    return { totalExpected, cuota, totalInterest };
 }
 
 export default function ClientDetail() {
@@ -61,6 +47,7 @@ export default function ClientDetail() {
     const [loadingClient, setLoadingClient] = useState(true);
 
     const { loans, loading: loadingLoans, addLoan, fetchLoans, updateLoanNotes, deleteLoan } = useLoans(id || '');
+    const [lastInterestPayments, setLastInterestPayments] = useState<Record<string, string | null>>({});
     const { clients, deleteClient } = useClients(); // For the picker
     const { addPayment } = usePayments();
 
@@ -75,7 +62,11 @@ export default function ClientDetail() {
     const [savingPayment, setSavingPayment] = useState(false);
     const [savingNote, setSavingNote] = useState(false);
     const [paymentAmount, setPaymentAmount] = useState('');
+    const [paymentType, setPaymentType] = useState<'principal' | 'interest_only' | 'mixed'>('principal');
+    const [principalAmount, setPrincipalAmount] = useState('');
+    const [interestAmount, setInterestAmount] = useState('');
     const [noteContent, setNoteContent] = useState('');
+    const [tempTermCount, setTempTermCount] = useState(''); // State for asking number of installments if missing
 
     // ─── Plan de Pagos: hook de persistencia ─────────────────────────────────
     const {
@@ -88,6 +79,7 @@ export default function ClientDetail() {
 
     const openPlanModal = useCallback((loan: Loan) => {
         setPlanLoan(loan);
+        setTempTermCount(loan.term_count?.toString() || '');
         setIsPlanModalOpen(true);
     }, []);
 
@@ -100,21 +92,20 @@ export default function ClientDetail() {
     const [firstDueDate, setFirstDueDate] = useState('');
     // Form State for new loan — Advanced
     const [advancedMode, setAdvancedMode] = useState(false);
-    const [interestType, setInterestType] = useState<'simple' | 'flat'>('simple');
+    const [interestType, setInterestType] = useState<'simple' | 'flat' | 'custom'>('simple');
     const [graceDays, setGraceDays] = useState('0');
     const [lateFeeType, setLateFeeType] = useState<'none' | 'fixed' | 'percent'>('none');
     const [lateFeeValue, setLateFeeValue] = useState('0');
     const [roundTo, setRoundTo] = useState<0 | 100 | 50>(0);
     const [loanNotes, setLoanNotes] = useState('');
 
-    // Live preview calculator
+    // Live preview calculator — now shows interest separate from total principal-based expectation
     const loanPreview = useMemo(() => calcLoanPreview({
         principal: parseFloat(amount) || 0,
         ratePercent: parseFloat(interestRate) || 0,
         termCount: parseInt(termCount) || 0,
-        interestType,
         roundTo: roundTo || 1,
-    }), [amount, interestRate, termCount, interestType, roundTo]);
+    }), [amount, interestRate, termCount, roundTo]);
 
     useEffect(() => {
         async function fetchClient() {
@@ -134,14 +125,50 @@ export default function ClientDetail() {
         fetchClient();
     }, [id]);
 
+    useEffect(() => {
+        const fetchLastPayments = async () => {
+            if (!loans.length) return;
+            const { data, error } = await supabase
+                .from('payments')
+                .select('loan_id, payment_date, payment_type')
+                .in('loan_id', loans.map(l => l.id))
+                .or('payment_type.eq.interest_only,payment_type.eq.mixed')
+                .order('payment_date', { ascending: false });
+
+            if (!error && data) {
+                const latest: Record<string, string | null> = {};
+                data.forEach(p => {
+                    if (!latest[p.loan_id]) {
+                        latest[p.loan_id] = p.payment_date;
+                    }
+                });
+                setLastInterestPayments(latest);
+            }
+        };
+        fetchLastPayments();
+    }, [loans]);
+
     const handleAddPayment = async (e: FormEvent) => {
         e.preventDefault();
         if (!selectedLoan) return;
         setSavingPayment(true);
 
+        const amountNum = parseInt(paymentAmount.replace(/\D/g, ''), 10);
+        const princNum = paymentType === 'mixed' ? parseInt(principalAmount.replace(/\D/g, ''), 10) : (paymentType === 'principal' ? amountNum : 0);
+        const intNum = paymentType === 'mixed' ? parseInt(interestAmount.replace(/\D/g, ''), 10) : (paymentType === 'interest_only' ? amountNum : 0);
+
+        if (paymentType === 'mixed' && princNum <= intNum) {
+            alert('El monto de abono a capital debe ser estrictamente superior al monto de interés.');
+            setSavingPayment(false);
+            return;
+        }
+
         const { error } = await addPayment({
             loan_id: selectedLoan.id,
-            amount: parseInt(paymentAmount, 10),
+            amount: amountNum,
+            payment_type: paymentType,
+            principal_amount: princNum,
+            interest_amount: intNum,
             method: 'cash'
         });
 
@@ -150,6 +177,9 @@ export default function ClientDetail() {
         if (!error) {
             setIsPaymentModalOpen(false);
             setPaymentAmount('');
+            setPrincipalAmount('');
+            setInterestAmount('');
+            setPaymentType('principal');
             fetchLoans();
         } else {
             alert(`Error al registrar pago: ${error}`);
@@ -346,7 +376,28 @@ export default function ClientDetail() {
                             const isOverdue = loan.status === 'overdue';
                             const isPaid = loan.status === 'paid';
                             const daysOverdue = isOverdue ? Math.floor((new Date().getTime() - new Date(loan.next_due_date).getTime()) / (1000 * 3600 * 24)) : 0;
-                            const cuota = loan.term_count > 0 ? Math.round(loan.total_expected / loan.term_count) : Math.round(loan.principal_amount * loan.interest_rate);
+
+                            // User request: capital is immutable and interest is recalculated based only on balance
+                            const currentInterestAmount = Math.round(loan.balance * loan.interest_rate);
+                            const currentPrincipalAmount = loan.principal_amount;
+
+                            // Interest badge logic
+                            const lastIntDate = lastInterestPayments[loan.id];
+                            const periodDays = loan.payment_frequency === 'monthly' ? 30 :
+                                loan.payment_frequency === 'biweekly' ? 15 :
+                                    loan.payment_frequency === 'weekly' ? 7 : 1;
+
+                            const hasInterestPaidRecent = lastIntDate && (() => {
+                                const lastDate = new Date(lastIntDate);
+                                const diffDays = (new Date().getTime() - lastDate.getTime()) / (1000 * 3600 * 24);
+                                return diffDays < periodDays;
+                            })();
+
+                            const showInterestBadge = !hasInterestPaidRecent && !isPaid && currentInterestAmount > 0;
+
+                            const cuota = loan.term_count > 0
+                                ? Math.round(loan.total_expected / loan.term_count)
+                                : Math.round(loan.balance * loan.interest_rate); // Updated fallback
 
                             return (
                                 <article
@@ -360,17 +411,32 @@ export default function ClientDetail() {
                                         <div>
                                             <div className="flex items-center gap-2 mb-1">
                                                 <span className={`w-2 h-2 rounded-full ${isOverdue ? 'bg-red-500 animate-pulse' : isPaid ? 'bg-green-500' : 'bg-brand-accent'}`} />
-                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Saldo Pendiente</p>
+                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Saldo Pendiente (Capital)</p>
                                             </div>
-                                            <p className={`text-2xl font-black ${isOverdue ? 'text-red-600' : 'text-text-main'}`}>
-                                                {formatCurrency(loan.balance)}
-                                            </p>
+                                            <div className="flex items-center gap-3">
+                                                <p className={`text-2xl font-black ${isOverdue ? 'text-red-600' : 'text-text-main'}`}>
+                                                    {formatCurrency(loan.balance)}
+                                                </p>
+                                                <div className={`px-3 py-1.5 rounded-xl border flex items-center gap-1.5 shadow-sm transition-all duration-300 ${showInterestBadge ? 'show bg-indigo-50 border-indigo-200' : 'hidden opacity-0 invisible'}`}>
+                                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                                                    <span className="text-[10px] font-black text-indigo-700 uppercase tracking-tight">
+                                                        + {formatCurrency(currentInterestAmount)} intereses
+                                                    </span>
+                                                </div>
+                                            </div>
                                         </div>
                                         <div className="flex flex-col items-end gap-1">
                                             <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${isPaid ? 'bg-green-100 text-green-700' : isOverdue ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
                                                 {isPaid ? 'Pagado' : isOverdue ? 'En Mora' : 'Al día'}
                                             </span>
                                             {isOverdue && <span className="text-[10px] font-bold text-red-600 italic">{daysOverdue} días de atraso</span>}
+                                            <button
+                                                onClick={() => navigate(`/prestamos/${loan.id}/editar`)}
+                                                className="mt-2 p-1.5 text-gray-300 hover:text-brand-accent transition-colors"
+                                                title="Editar Préstamo"
+                                            >
+                                                <Settings2 size={16} />
+                                            </button>
                                             <button
                                                 onClick={() => handleDeleteLoan(loan.id)}
                                                 className="mt-2 p-1.5 text-gray-300 hover:text-red-500 transition-colors"
@@ -387,8 +453,8 @@ export default function ClientDetail() {
                                                 <DollarSign size={14} />
                                             </div>
                                             <div>
-                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Principal</p>
-                                                <p className="text-xs font-bold text-text-main/80">{formatCurrency(loan.principal_amount)}</p>
+                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Capital (Monto Original)</p>
+                                                <p className="text-xs font-bold text-text-main/80">{formatCurrency(currentPrincipalAmount)}</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -396,8 +462,8 @@ export default function ClientDetail() {
                                                 <Percent size={14} />
                                             </div>
                                             <div>
-                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Interés</p>
-                                                <p className="text-xs font-bold text-text-main/80">{Math.round(loan.interest_rate * 100)}%</p>
+                                                <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Interés ({Math.round(loan.interest_rate * 100)}%)</p>
+                                                <p className="text-xs font-bold text-brand-accent">{formatCurrency(currentInterestAmount)}</p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
@@ -419,7 +485,14 @@ export default function ClientDetail() {
                                             </div>
                                             <div>
                                                 <p className="text-[8px] font-bold text-gray-400 uppercase tracking-tighter">Próximo Pago</p>
-                                                <p className="text-xs font-bold text-gray-700">{loan.next_due_date}</p>
+                                                <p className={`text-xs font-bold ${loan.status === 'overdue' ? 'text-red-500' :
+                                                    loan.next_due_date === new Date().toISOString().split('T')[0] ? 'text-amber-500' :
+                                                        'text-gray-700'
+                                                    }`}>
+                                                    {loan.next_due_date ? (
+                                                        loan.next_due_date === new Date().toISOString().split('T')[0] ? '¡Hoy!' : formatDate(loan.next_due_date)
+                                                    ) : 'Completado'}
+                                                </p>
                                             </div>
                                         </div>
                                     </div>
@@ -432,15 +505,17 @@ export default function ClientDetail() {
                                     )}
 
                                     <div className="flex gap-2">
-                                        {loan.term_count > 0 && (
-                                            <button
-                                                onClick={() => openPlanModal(loan)}
-                                                className="w-12 h-12 bg-indigo-50 border border-indigo-100 text-indigo-400 hover:text-indigo-600 hover:border-indigo-300 rounded-xl flex items-center justify-center active:scale-95 transition-all"
-                                                title="Plan de Pagos"
-                                            >
-                                                <LayoutGrid size={18} />
-                                            </button>
-                                        )}
+                                        <button
+                                            onClick={() => openPlanModal(loan)}
+                                            className={`w-12 h-12 rounded-xl flex items-center justify-center active:scale-95 transition-all
+                                                ${loan.term_count > 0
+                                                    ? 'bg-indigo-50 border border-indigo-100 text-indigo-400 hover:text-indigo-600 hover:border-indigo-300'
+                                                    : 'bg-gray-50 border border-gray-100 text-gray-300 hover:text-gray-400'
+                                                }`}
+                                            title="Plan de Pagos"
+                                        >
+                                            <LayoutGrid size={18} />
+                                        </button>
                                         {!isPaid && (
                                             <button
                                                 onClick={() => {
@@ -669,7 +744,7 @@ export default function ClientDetail() {
                                                 <p className="text-base font-black">{formatCurrency(loanPreview.cuota)}</p>
                                             </div>
                                             <div>
-                                                <p className="text-[8px] text-blue-200 font-black uppercase tracking-wide mb-0.5">Interés Total</p>
+                                                <p className="text-[8px] text-blue-200 font-black uppercase tracking-wide mb-0.5">Interés por Cuota</p>
                                                 <p className="text-base font-black">{formatCurrency(loanPreview.totalInterest)}</p>
                                             </div>
                                             <div>
@@ -714,67 +789,110 @@ export default function ClientDetail() {
                             <button onClick={() => setIsPaymentModalOpen(false)} className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">✕</button>
                         </div>
                         <form onSubmit={handleAddPayment} className="space-y-6">
-                            <div className="text-center">
-                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2" htmlFor="payAmount">Monto a recibir ($)</label>
-                                <input
-                                    id="payAmount"
-                                    type="tel"
-                                    className="w-full bg-transparent border-none text-5xl font-black text-brand-primary text-center focus:outline-none placeholder-gray-200"
-                                    value={paymentAmount ? paymentAmount.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ''}
-                                    onChange={(e) => setPaymentAmount(e.target.value.replace(/\D/g, ''))}
-                                    required
-                                    autoFocus
-                                    placeholder="0"
-                                />
-                                <div className="mt-3 inline-flex items-center gap-2 px-4 py-1.5 bg-gray-50 rounded-full text-[10px] font-bold text-gray-500 uppercase border border-gray-100">
+                            {/* Payment Type Selector */}
+                            <div className="flex bg-gray-100 rounded-2xl p-1 gap-1">
+                                {(['interest_only', 'mixed'] as const).map((t) => (
+                                    <button
+                                        key={t}
+                                        type="button"
+                                        onClick={() => {
+                                            setPaymentType(t);
+                                            if (t === 'interest_only') {
+                                                setPrincipalAmount('');
+                                                setInterestAmount('');
+                                            }
+                                        }}
+                                        className={`flex-1 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all ${paymentType === t ? 'bg-white text-brand-accent shadow-sm' : 'text-gray-400'}`}
+                                    >
+                                        {t === 'interest_only' ? 'Solo Interés' : 'Personalizado'}
+                                    </button>
+                                ))}
+                            </div>
+
+                            {paymentType !== 'mixed' ? (
+                                <div className="text-center">
+                                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2" htmlFor="payAmount">Monto a recibir ($)</label>
+                                    <input
+                                        id="payAmount"
+                                        type="tel"
+                                        className="w-full bg-transparent border-none text-5xl font-black text-brand-primary text-center focus:outline-none placeholder-gray-200"
+                                        value={paymentAmount ? paymentAmount.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ''}
+                                        onChange={(e) => setPaymentAmount(e.target.value.replace(/\D/g, ''))}
+                                        required
+                                        autoFocus
+                                        placeholder="0"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1" htmlFor=" princAmount">Abono Capital ($)</label>
+                                            <input
+                                                id="princAmount"
+                                                type="tel"
+                                                className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent font-black text-xl"
+                                                value={principalAmount ? principalAmount.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    setPrincipalAmount(val);
+                                                    const total = (parseInt(val || '0') + parseInt(interestAmount || '0')).toString();
+                                                    setPaymentAmount(total);
+                                                }}
+                                                required
+                                                placeholder="0"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1" htmlFor="intAmount">Abono Interés ($)</label>
+                                            <input
+                                                id="intAmount"
+                                                type="tel"
+                                                className="w-full px-4 py-3 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-black text-xl"
+                                                value={interestAmount ? interestAmount.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    setInterestAmount(val);
+                                                    const total = (parseInt(principalAmount || '0') + parseInt(val || '0')).toString();
+                                                    setPaymentAmount(total);
+                                                }}
+                                                required
+                                                placeholder="0"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="text-center pt-2 border-t border-gray-50">
+                                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total a Recibir</p>
+                                        <p className="text-3xl font-black text-brand-primary">{formatCurrency(parseInt(paymentAmount || '0'))}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="mt-3 flex justify-center">
+                                <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-gray-50 rounded-full text-[10px] font-bold text-gray-500 uppercase border border-gray-100">
                                     <Smartphone size={12} className="text-brand-accent" />
                                     Saldo actual: {formatCurrency(selectedLoan.balance)}
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-2 mt-2">
-                                {(() => {
-                                    const interesAmount = selectedLoan.term_count > 0 ? Math.round((selectedLoan.total_expected - selectedLoan.principal_amount) / selectedLoan.term_count) : Math.round(selectedLoan.principal_amount * selectedLoan.interest_rate);
-                                    const capitalAmount = selectedLoan.term_count > 0 ? Math.round(selectedLoan.principal_amount / selectedLoan.term_count) : selectedLoan.principal_amount;
-                                    const interesMasCuotaAmount = interesAmount + capitalAmount;
-
-                                    return (
-                                        <>
-                                            <button 
-                                                type="button" 
+                            {paymentType === 'interest_only' && (
+                                <div className="grid grid-cols-2 gap-2 mt-2">
+                                    {(() => {
+                                        // Interest is now always calculated on the current balance
+                                        const interesAmount = Math.round(selectedLoan.balance * selectedLoan.interest_rate);
+                                        return (
+                                            <button
+                                                type="button"
                                                 onClick={() => setPaymentAmount(interesAmount.toString())}
-                                                className={`py-2.5 px-2 rounded-xl border text-[9px] font-black uppercase tracking-wide transition-all ${paymentAmount === interesAmount.toString() ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}
+                                                className={`col-span-2 py-4 px-4 rounded-2xl border-2 text-xs font-black uppercase tracking-widest transition-all ${paymentAmount === interesAmount.toString() ? 'bg-indigo-600 border-indigo-600 text-white shadow-lg' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}
                                             >
-                                                Solo Interés
+                                                Sugerido: {formatCurrency(interesAmount)} (Sólo Interés)
                                             </button>
-                                            <button 
-                                                type="button" 
-                                                onClick={() => setPaymentAmount(capitalAmount.toString())}
-                                                className={`py-2.5 px-2 rounded-xl border text-[9px] font-black uppercase tracking-wide transition-all ${paymentAmount === capitalAmount.toString() ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}
-                                            >
-                                                Solo Cuota
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                onClick={() => setPaymentAmount(interesMasCuotaAmount.toString())}
-                                                className={`py-2.5 px-2 rounded-xl border text-[9px] font-black uppercase tracking-wide transition-all ${paymentAmount === interesMasCuotaAmount.toString() ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}
-                                            >
-                                                Interés + Cuota
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                onClick={() => {
-                                                    setPaymentAmount('');
-                                                    document.getElementById('payAmount')?.focus();
-                                                }}
-                                                className={`py-2.5 px-2 rounded-xl border text-[9px] font-black uppercase tracking-wide transition-all ${paymentAmount !== interesAmount.toString() && paymentAmount !== capitalAmount.toString() && paymentAmount !== interesMasCuotaAmount.toString() && paymentAmount !== '' ? 'bg-brand-accent border-brand-accent text-white' : 'bg-white border-gray-100 text-gray-500 hover:bg-gray-50'}`}
-                                            >
-                                                Personalizado
-                                            </button>
-                                        </>
-                                    );
-                                })()}
-                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+
                             <button type="submit" className="w-full bg-brand-primary hover:bg-emerald-700 text-white h-16 rounded-2xl font-black shadow-lg shadow-emerald-500/20 active:scale-95 transition-all text-xl flex items-center justify-center gap-3" disabled={savingPayment}>
                                 {savingPayment ? 'Sincronizando...' : (
                                     <>
@@ -867,28 +985,81 @@ export default function ClientDetail() {
                                         <p className="text-sm font-bold animate-pulse">Cargando plan...</p>
                                     </div>
                                 ) : cuotas.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-12 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-                                        <Calendar size={40} className="text-gray-200 mb-3" />
-                                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">No se ha generado el plan</p>
+                                    <div className="flex flex-col items-center justify-center py-10 text-center bg-gray-50/50 rounded-[2rem] border-2 border-dashed border-gray-100 px-8 mx-2">
+                                        <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center mb-4">
+                                            <Calendar size={32} className="text-indigo-200" />
+                                        </div>
+
+                                        <h3 className="text-sm font-black text-gray-900 uppercase tracking-wider mb-2">Plan no inicializado</h3>
+                                        <p className="text-xs text-gray-400 font-medium mb-8 leading-relaxed max-w-[240px]">
+                                            Para comenzar a cobrar, es necesario proyectar el cronograma de cuotas.
+                                        </p>
+
+                                        {(!planLoan.term_count || planLoan.term_count === 0) && (
+                                            <div className="w-full max-w-xs mb-8 p-6 bg-white rounded-3xl shadow-sm border border-gray-100 animate-in zoom-in duration-300">
+                                                <div className="flex items-center gap-2 mb-4">
+                                                    <Percent size={14} className="text-indigo-500" />
+                                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                                                        Definir número de cuotas
+                                                    </label>
+                                                </div>
+                                                <input
+                                                    type="number"
+                                                    min="1"
+                                                    className="w-full px-5 py-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-black text-2xl text-center text-indigo-600 placeholder:text-gray-200 transition-all"
+                                                    value={tempTermCount}
+                                                    onChange={(e) => setTempTermCount(e.target.value)}
+                                                    placeholder="0"
+                                                    autoFocus
+                                                />
+                                                <div className="mt-4 flex items-start gap-2 text-left">
+                                                    <AlertTriangle size={12} className="text-amber-500 mt-0.5 flex-shrink-0" />
+                                                    <p className="text-[9px] text-gray-400 font-bold uppercase leading-tight">
+                                                        El botón "Generar" se activará una vez ingreses el número de cuotas.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        )}
+
                                         <button
+                                            disabled={(parseInt(tempTermCount) || 0) <= 0 && (!planLoan.term_count || planLoan.term_count === 0)}
                                             onClick={async () => {
+                                                const nCuotas = planLoan.term_count > 0 ? planLoan.term_count : parseInt(tempTermCount);
+
+                                                if (!nCuotas || nCuotas <= 0) {
+                                                    alert("El número de cuotas debe ser mayor a 0");
+                                                    return;
+                                                }
+
                                                 await generarCronograma({
                                                     prestamo_id: planLoan.id,
                                                     fecha_primer_vencimiento: planLoan.first_due_date || new Date().toISOString().split('T')[0],
                                                     frecuencia: planLoan.payment_frequency as any,
-                                                    numero_cuotas: planLoan.term_count || 1,
+                                                    numero_cuotas: nCuotas,
                                                     monto_total: planLoan.total_expected
                                                 });
                                             }}
-                                            className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-indigo-200 active:scale-95 transition-all"
+                                            className={`group relative w-full h-16 rounded-2xl font-black text-sm uppercase tracking-widest transition-all overflow-hidden
+                                                ${((parseInt(tempTermCount) || 0) > 0 || planLoan.term_count > 0)
+                                                    ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 active:scale-95'
+                                                    : 'bg-gray-100 text-gray-300 cursor-not-allowed grayscale'
+                                                }`}
                                         >
-                                            Generar Cronograma ahora
+                                            <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                                            <span className="relative flex items-center justify-center gap-2">
+                                                {((parseInt(tempTermCount) || 0) > 0 || planLoan.term_count > 0) ? (
+                                                    <><RotateCcw size={18} className="animate-in fade-in zoom-in" /> Generar Plan de Pagos</>
+                                                ) : (
+                                                    <><Shield size={18} className="opacity-50" /> Esperando Cuotas</>
+                                                )}
+                                            </span>
                                         </button>
                                     </div>
                                 ) : (
                                     <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 lg:grid-cols-5">
                                         {cuotas.map((inst: CuotaPlan) => {
                                             const isChecked = inst.estado === 'pagado';
+                                            const isPartial = inst.estado === 'parcial';
                                             const instDate = new Date(inst.fecha_vencimiento);
                                             const isToday = instDate.toDateString() === new Date().toDateString();
                                             const isLate = inst.estado === 'vencido';
@@ -900,28 +1071,34 @@ export default function ClientDetail() {
                                                     className={`relative flex flex-col items-center justify-center gap-1 rounded-2xl border-2 p-3 transition-all active:scale-95 select-none
                                                         ${isChecked
                                                             ? 'bg-emerald-50 border-emerald-400'
-                                                            : isToday
-                                                                ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300/50'
-                                                                : isLate
-                                                                    ? 'bg-red-50 border-red-300'
-                                                                    : 'bg-gray-50 border-gray-100'
+                                                            : isPartial
+                                                                ? 'bg-orange-50 border-orange-400'
+                                                                : isToday
+                                                                    ? 'bg-amber-50 border-amber-400 ring-2 ring-amber-300/50'
+                                                                    : isLate
+                                                                        ? 'bg-red-50 border-red-300'
+                                                                        : 'bg-gray-50 border-gray-100'
                                                         }`}
                                                 >
-                                                    <span className={`text-[10px] font-black uppercase tracking-widest ${isChecked ? 'text-emerald-600' : isLate ? 'text-red-500' : isToday ? 'text-amber-600' : 'text-gray-400'
+                                                    <span className={`text-[10px] font-black uppercase tracking-widest ${isChecked ? 'text-emerald-600' : isPartial ? 'text-orange-600' : isLate ? 'text-red-500' : isToday ? 'text-amber-600' : 'text-gray-400'
                                                         }`}>
                                                         #{inst.numero_cuota}
                                                     </span>
 
                                                     <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${isChecked
                                                         ? 'bg-emerald-500 text-white'
-                                                        : isToday
-                                                            ? 'bg-amber-400 text-white'
-                                                            : isLate
-                                                                ? 'bg-red-100 text-red-500'
-                                                                : 'bg-white border-2 border-gray-200 text-gray-300'
+                                                        : isPartial
+                                                            ? 'bg-orange-500 text-white'
+                                                            : isToday
+                                                                ? 'bg-amber-400 text-white'
+                                                                : isLate
+                                                                    ? 'bg-red-100 text-red-500'
+                                                                    : 'bg-white border-2 border-gray-200 text-gray-300'
                                                         }`}>
                                                         {isChecked ? (
                                                             <CheckCircle2 size={16} />
+                                                        ) : isPartial ? (
+                                                            <span className="text-[9px] font-black">1/2</span>
                                                         ) : isToday ? (
                                                             <span className="text-[9px] font-black">HOY</span>
                                                         ) : isLate ? (
@@ -931,14 +1108,14 @@ export default function ClientDetail() {
                                                         )}
                                                     </div>
 
-                                                    <span className={`text-[9px] font-black ${isChecked ? 'text-emerald-700' : isLate ? 'text-red-600' : 'text-gray-600'
+                                                    <span className={`text-[9px] font-black ${isChecked ? 'text-emerald-700' : isPartial ? 'text-orange-700' : isLate ? 'text-red-600' : 'text-gray-600'
                                                         }`}>
                                                         {formatCurrency(inst.monto_cuota)}
                                                     </span>
 
-                                                    <span className={`text-[8px] font-medium leading-none text-center ${isChecked ? 'text-emerald-500' : isLate ? 'text-red-400' : 'text-gray-400'
+                                                    <span className={`text-[8px] font-medium leading-none text-center ${isChecked ? 'text-emerald-500' : isPartial ? 'text-orange-500' : isLate ? 'text-red-400' : 'text-gray-400'
                                                         }`}>
-                                                        {new Date(inst.fecha_vencimiento).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}
+                                                        {formatDate(inst.fecha_vencimiento)}
                                                     </span>
                                                 </button>
                                             );

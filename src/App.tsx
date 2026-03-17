@@ -4,10 +4,12 @@ import Dashboard from './pages/Dashboard.tsx';
 import Clients from './pages/Clients.tsx';
 import NewLoan from './pages/NewLoan.tsx';
 import Cobranza from './pages/Cobranza.tsx';
-import Reportes from './pages/Reportes.tsx';
+import History from './pages/History.tsx';
 import ClientDetail from './pages/ClientDetail.tsx';
 import Settings from './pages/Settings.tsx';
 import Login from './pages/Login.tsx';
+import Register from './pages/Register.tsx';
+import EditLoan from './pages/EditLoan.tsx';
 import { useAuth } from './hooks/useAuth.ts';
 import { usePushNotifications } from './hooks/usePushNotifications.ts';
 import './index.css';
@@ -50,6 +52,10 @@ function App() {
           path="/login"
           element={session ? <Navigate to="/" replace /> : <Login />}
         />
+        <Route
+          path="/register"
+          element={session ? <Navigate to="/" replace /> : <Register />}
+        />
 
         {/* Rutas Privadas / Protegidas */}
         <Route element={<PrivateRoute isAuthenticated={!!session} userId={session?.user?.id} />}>
@@ -57,8 +63,9 @@ function App() {
           <Route path="/clientes" element={<Clients />} />
           <Route path="/clientes/:id" element={<ClientDetail />} />
           <Route path="/cobranza" element={<Cobranza />} />
-          <Route path="/reportes" element={<Reportes />} />
+          <Route path="/historial" element={<History />} />
           <Route path="/nuevo-prestamo" element={<NewLoan />} />
+          <Route path="/prestamos/:id/editar" element={<EditLoan />} />
           <Route path="/ajustes" element={<Settings />} />
         </Route>
 

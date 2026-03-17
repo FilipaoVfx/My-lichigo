@@ -108,7 +108,10 @@ export default function Cobranza() {
                         filteredList.map((loan) => {
                             const isOverdue = view === 'overdue';
                             const client = (loan as any).clients;
-                            const cuota = Math.round(loan.total_expected / loan.term_count);
+                            const isFlat = loan.interest_type === 'flat';
+                            const cuota = loan.term_count > 0
+                                ? Math.round(loan.total_expected / loan.term_count)
+                                : Math.round((isFlat ? loan.principal_amount : loan.balance) * loan.interest_rate);
 
                             return (
                                 <article

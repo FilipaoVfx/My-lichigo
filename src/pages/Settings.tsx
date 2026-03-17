@@ -55,10 +55,10 @@ export default function Settings() {
         {
             title: 'Notificaciones',
             items: [
-                { 
-                    id: 'reminders', 
-                    name: 'Recordatorios de cobro', 
-                    icon: <Bell size={20} className="text-purple-500" />, 
+                {
+                    id: 'reminders',
+                    name: 'Recordatorios de cobro',
+                    icon: <Bell size={20} className="text-purple-500" />,
                     type: 'toggle',
                     value: notificationsEnabled,
                     action: async () => {
@@ -73,18 +73,50 @@ export default function Settings() {
                             setNotificationsEnabled(result === 'granted');
                             if (result === 'granted') {
                                 if ('serviceWorker' in navigator) {
-                                    const reg = await navigator.serviceWorker.ready;
-                                    reg.showNotification('Notificaciones Activadas', {
-                                        body: 'Recibirás alertas de mora y cobros diarios.',
-                                        icon: '/pwa-icon.png',
-                                        badge: '/mask-icon.svg',
-                                    } as any);
-                                } else {
-                                    new Notification('Notificaciones Activadas', { body: 'Recibirás alertas de mora y cobros diarios.', icon: '/pwa-icon.png' });
+                                    try {
+                                        const registrations = await navigator.serviceWorker.getRegistrations();
+                                        let swReg = registrations.length > 0 ? registrations[0] : null;
+
+                                        if (!swReg) {
+                                            swReg = await Promise.race([
+                                                navigator.serviceWorker.ready,
+                                                new Promise<any>((_, reject) => setTimeout(() => reject(new Error('SW Timeout')), 1500))
+                                            ]).catch(() => null);
+                                        }
+
+                                        if (swReg) {
+                                            // Attempt to clear stale SW
+                                            swReg.update().catch(() => {});
+                                            
+                                            await (swReg as ServiceWorkerRegistration).showNotification('Notificaciones Activadas', {
+                                                body: 'Recibirás alertas de mora y cobros diarios.',
+                                                icon: '/pwa-icon.png',
+                                                badge: '/mask-icon.svg',
+                                                vibrate: [200, 100, 200, 100, 200],
+                                                tag: `prestamos-alert-${Date.now()}`,
+                                                requireInteraction: true
+                                            } as any);
+                                            return;
+                                        }
+                                    } catch (err) {
+                                        console.warn('Error fetching SW for welcome push', err);
+                                    }
                                 }
+
+                                // Fallback
+                                const fallbackNotif = new Notification('Notificaciones Activadas', { 
+                                    body: 'Recibirás alertas de mora y cobros diarios.', 
+                                    icon: '/pwa-icon.png',
+                                    tag: `prestamos-alert-${Date.now()}`,
+                                    requireInteraction: true
+                                });
+                                fallbackNotif.onclick = () => {
+                                    window.focus();
+                                    fallbackNotif.close();
+                                };
                             }
                         }
-                    } 
+                    }
                 },
             ]
         },

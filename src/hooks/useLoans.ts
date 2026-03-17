@@ -51,19 +51,9 @@ export function useLoans(clientId: string) {
             if (clientError || !client) throw new Error("Cliente no encontrado");
             if (client.is_deleted) throw new Error("No se puede asignar un préstamo a un cliente eliminado");
 
-            // Calculation engine — respects interest_type
-            const rate = loanData.interest_rate;
-            const principal = loanData.principal_amount;
-            const terms = loanData.term_count || 1;
-            let totalExpected: number;
-
-            if (loanData.interest_type === 'flat') {
-                // Flat: interest always calculated on original principal (informal/gota-a-gota style)
-                totalExpected = Math.round(principal + (principal * rate * terms));
-            } else {
-                // Simple: same formula for MVP — interest accrued per period on principal
-                totalExpected = Math.round(principal + (principal * rate * terms));
-            }
+            // User requested: capital immutable, interest dynamic. 
+            // We no longer pre-calculate interest into the balance.
+            const totalExpected = loanData.principal_amount;
 
 
             const newLoanData = {
@@ -109,6 +99,27 @@ export function useLoans(clientId: string) {
         }
     };
 
+    const updateLoan = async (loanId: string, loanData: Partial<Loan>) => {
+        try {
+            const { data, error } = await supabase
+                .from('loans')
+                .update({ 
+                    ...loanData, 
+                    updated_at: new Date().toISOString() 
+                })
+                .eq('id', loanId)
+                .select()
+                .single();
+
+            if (error) throw error;
+            setLoans(prev => prev.map(l => l.id === loanId ? (data as Loan) : l));
+            return { data, error: null };
+        } catch (err: any) {
+            console.error('Error updating loan:', err);
+            return { data: null, error: err.message };
+        }
+    };
+
     const deleteLoan = async (loanId: string) => {
         try {
             const { error } = await supabase
@@ -125,5 +136,5 @@ export function useLoans(clientId: string) {
         }
     };
 
-    return { loans, loading, error, fetchLoans, addLoan, updateLoanNotes, deleteLoan };
+    return { loans, loading, error, fetchLoans, addLoan, updateLoan, updateLoanNotes, deleteLoan };
 }

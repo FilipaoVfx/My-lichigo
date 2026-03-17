@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { supabase } from '../lib/supabase.ts';
 import { Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export default function Login() {
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
+    const navigate = useNavigate();
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -20,23 +22,6 @@ export default function Login() {
 
         if (error) {
             setError(error.message);
-        }
-        setLoading(false);
-    };
-
-    const handleSignUp = async () => {
-        setLoading(true);
-        setError(null);
-
-        const { error } = await supabase.auth.signUp({
-            email,
-            password,
-        });
-
-        if (error) {
-            setError(error.message);
-        } else {
-            setError("Verifica tu email para confirmar el registro.");
         }
         setLoading(false);
     };
@@ -72,6 +57,7 @@ export default function Login() {
                                     </div>
                                     <input
                                         type="email"
+                                        id="login-email"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
                                         className="w-full h-14 pl-12 pr-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent transition-all font-bold text-gray-900 placeholder:text-gray-300"
@@ -89,6 +75,7 @@ export default function Login() {
                                     </div>
                                     <input
                                         type="password"
+                                        id="login-password"
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         className="w-full h-14 pl-12 pr-4 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-brand-accent transition-all font-bold text-gray-900 placeholder:text-gray-300"
@@ -103,6 +90,7 @@ export default function Login() {
                             <button
                                 type="submit"
                                 disabled={loading}
+                                id="btn-login"
                                 className="w-full h-16 bg-brand-deepBlue hover:bg-blue-900 text-white font-black rounded-2xl shadow-lg shadow-blue-900/20 active:scale-95 transition-all text-lg flex items-center justify-center gap-3"
                             >
                                 {loading ? (
@@ -113,8 +101,9 @@ export default function Login() {
                             </button>
                             <button
                                 type="button"
-                                onClick={handleSignUp}
+                                onClick={() => navigate('/register')}
                                 disabled={loading}
+                                id="btn-goto-register"
                                 className="w-full h-14 bg-transparent text-gray-400 font-bold rounded-2xl hover:bg-gray-50 active:scale-95 transition-all text-sm"
                             >
                                 ¿No tienes cuenta? Regístrate
