@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 
 const VAPID_PUBLIC_KEY = 'BLb2eXXY-EXMrwqA9sMOaXZrH7P3aNZRmrpFbJUzzwZ6HVi1Dr3QEqfDr57WCXlx3Jxk3h9hLCtbGXSz0mhZPvM';
@@ -18,14 +18,35 @@ export function usePushNotifications(userId: string | undefined) {
   const [permission, setPermission] = useState<NotificationPermission>(
     'Notification' in window ? Notification.permission : 'default'
   );
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isSubscribed, setIsSubscribed] = useState(false);
 
+  // Check initial subscription status in DB
+  useEffect(() => {
+    if (!userId) return;
+    
+    const checkSubscription = async () => {
+      const { data, error } = await supabase
+        .from('push_subscriptions')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      if (!error && data) {
+        setIsSubscribed(true);
+      }
+    };
+    
+    checkSubscription();
+  }, [userId]);
+
+  // Realtime listener for in-app alerts
   useEffect(() => {
     if (!userId) return;
     if (!('Notification' in window)) return;
 
-    // Subscribe to DB events from the new "notifications" table
     const channel = supabase
-      .channel('backend-notifications')
+      .channel(`user-notifications-${userId}`)
       .on(
         'postgres_changes',
         {
@@ -36,7 +57,6 @@ export function usePushNotifications(userId: string | undefined) {
         },
         (payload) => {
           const newNotification = payload.new as any;
-          
           if (newNotification.title && newNotification.body) {
             sendNotification(newNotification.title, newNotification.body);
           }
@@ -49,104 +69,111 @@ export function usePushNotifications(userId: string | undefined) {
     };
   }, [userId]);
 
-  const requestPermission = async () => {
-    if (!('Notification' in window)) return false;
-    const result = await Notification.requestPermission();
-    setPermission(result);
-    if (result === 'granted') {
-      await subscribeToPush();
-      sendNotification('Notificaciones Activadas', 'Recibirás avisos de cobros y mora incluso con la app cerrada.');
-    }
-    return result === 'granted';
-  };
-
-  const subscribeToPush = async () => {
-    if (!('serviceWorker' in navigator) || !userId) return;
-
+  const subscribeToPush = useCallback(async () => {
+    if (!('serviceWorker' in navigator) || !userId) return false;
+    
+    setIsSyncing(true);
     try {
       const registration = await navigator.serviceWorker.ready;
       
-      const subscription = await registration.pushManager.subscribe({
+      // Ensure we have a clean slate if needed
+      let subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        await subscription.unsubscribe();
+      }
+
+      subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
       });
 
-      // Save to Supabase
       const { error } = await supabase
         .from('push_subscriptions')
         .upsert({
           user_id: userId,
           subscription: subscription.toJSON(),
-          device_info: navigator.userAgent
-        });
+          device_info: `${navigator.platform} - ${navigator.userAgent.slice(0, 50)}`,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
 
-      if (error) console.error('Error saving push subscription:', error);
-      else console.log('✅ Push subscription saved successfully');
-
+      if (error) throw error;
+      
+      setIsSubscribed(true);
+      console.log('✅ Push subscription synced with server');
+      return true;
     } catch (err) {
-      console.error('Failed to subscribe to push notifications:', err);
+      console.error('❌ Failed to subscribe to push notifications:', err);
+      return false;
+    } finally {
+      setIsSyncing(false);
     }
+  }, [userId]);
+
+  const requestPermission = async () => {
+    if (!('Notification' in window)) return false;
+    
+    const result = await Notification.requestPermission();
+    setPermission(result);
+    
+    if (result === 'granted') {
+      const success = await subscribeToPush();
+      if (success) {
+        sendNotification('¡Sistema Activo!', 'Ahora recibirás alertas de cobranza directamente en este dispositivo.');
+      }
+    }
+    return result === 'granted';
   };
 
   const sendNotification = async (title: string, body: string) => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') {
-      return;
-    }
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
-    // Check if we have a service worker registered
-    let swRegistration = null;
-    if ('serviceWorker' in navigator) {
-      try {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        if (registrations.length > 0) {
-          swRegistration = registrations[0];
-          // Try to update SW just in case it's stale
-          swRegistration.update().catch(() => {});
-        } else {
-          // Si Vite PWA lo acaba de inyectar pero getRegistrations no lo devuelve inmediato
-          swRegistration = await Promise.race([
-            navigator.serviceWorker.ready,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('SW Timeout')), 1500))
-          ]).catch(() => null);
-        }
-      } catch (err) {
-        console.warn('Error fetching service worker registration, falling back to basic notification', err);
-      }
-    }
-
-    if (swRegistration) {
-      try {
-        await (swRegistration as ServiceWorkerRegistration).showNotification(title, {
-          body,
-          icon: '/pwa-icon.png',
-          badge: '/mask-icon.svg',
-          vibrate: [200, 100, 200, 100, 200],
-          tag: `prestamos-alert-${Date.now()}`, // Dynamic tag so OS always alerts
-          requireInteraction: true, // Forces notification to stay on screen until dismissed
-        } as any);
-        return;
-      } catch (err) {
-        console.warn('Failed to show notification via service worker, falling back', err);
-      }
-    }
-
-    // Fallback standard notification stringently
-    try {
-      const fallbackNotif = new Notification(title, { 
-        body, 
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (registration) {
+      registration.showNotification(title, {
+        body,
         icon: '/pwa-icon.png',
-        tag: `prestamos-alert-${Date.now()}`,
-        requireInteraction: true
+        badge: '/mask-icon.svg',
+        vibrate: [100, 50, 100],
+        requireInteraction: true,
+        data: { url: window.location.origin }
       });
-      // Optionally handle click
-      fallbackNotif.onclick = () => {
-        window.focus();
-        fallbackNotif.close();
-      };
-    } catch (e) {
-      console.error('Final fallback notification failed', e);
+    } else {
+      new Notification(title, { body, icon: '/pwa-icon.png' });
     }
   };
 
-  return { permission, requestPermission, sendNotification };
+  // NEW: Direct test with Edge Function to eliminate friction
+  const triggerTest = async () => {
+    if (!userId) return { success: false, message: 'No active session' };
+    
+    setIsSyncing(true);
+    try {
+      // First ensure the subscription is fresh
+      await subscribeToPush();
+
+      // Directly invoke the function for this specific user
+      const { data, error } = await supabase.functions.invoke('detect-overdue-loans', {
+        body: { force_user_id: userId, is_test: true }
+      });
+
+      if (error) throw error;
+      return { success: true, data };
+    } catch (err: any) {
+      console.error('Test trigger failed:', err);
+      return { success: false, message: err.message };
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  return { 
+    permission, 
+    isSubscribed, 
+    isSyncing, 
+    requestPermission, 
+    subscribeToPush, 
+    triggerTest,
+    sendNotification 
+  };
 }
+
