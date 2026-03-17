@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Moon, Sun, Bell, Shield, ChevronRight, ArrowLeft, RefreshCw, Send, AlertCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { usePushNotifications } from '../hooks/usePushNotifications';

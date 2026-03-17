@@ -136,9 +136,9 @@ export function usePushNotifications(userId: string | undefined) {
         vibrate: [100, 50, 100],
         requireInteraction: true,
         data: { url: window.location.origin }
-      });
+      } as any);
     } else {
-      new Notification(title, { body, icon: '/pwa-icon.png' });
+      new Notification(title, { body, icon: '/pwa-icon.png' } as any);
     }
   };
 
