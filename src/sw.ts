@@ -8,7 +8,7 @@ precacheAndRoute(self.__WB_MANIFEST);
 // --- AGGRESSIVE PUSH HANDLING ---
 self.addEventListener('push', (event) => {
   let data: any = {};
-  
+
   if (event.data) {
     try {
       data = event.data.json();
@@ -22,17 +22,18 @@ self.addEventListener('push', (event) => {
     body: data.body || 'Tienes una actualización importante de tu cartera.',
     icon: '/pwa-icon.png',
     badge: '/mask-icon.svg',
+    // @ts-ignore - vibrate is not in the standard NotificationOptions type but is supported by browsers
     vibrate: [200, 100, 200, 100, 200, 100, 200],
     tag: data.tag || 'loan-notification',
     renotify: true, // Vibrates even if tag is the same
     requireInteraction: true,
-    data: { 
+    data: {
       url: data.url || '/',
       timestamp: Date.now()
     },
     silent: false, // Ensure sound if device allows
     // @ts-ignore - Specific to some browsers for high priority
-    priority: 2, 
+    priority: 2,
     actions: [
       { action: 'open', title: 'Ver ahora' }
     ]
